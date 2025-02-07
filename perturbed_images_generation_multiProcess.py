@@ -11,7 +11,16 @@ import scipy.spatial.qhull as qhull  # For Delaunay triangulation
 
 def getDatasets(dir):
     """Returns a list of filenames in the given directory."""
-    return os.listdir(dir)
+    try:
+        files = os.listdir(dir)
+        print(f"getDatasets({dir}): Found {len(files)} files/directories.")  # Debug print
+        return files
+    except FileNotFoundError:
+        print(f"ERROR: getDatasets({dir}): Directory not found!")
+        return []  # Return an empty list to avoid crashing
+    except Exception as e:
+        print(f"ERROR in getDatasets({dir}): {e}")
+        return []
 
 class perturbed(object):
     """Class to handle the image perturbation process."""
@@ -103,12 +112,16 @@ class perturbed(object):
         return np.einsum('njk,nj->nk', np.take(values, vtx, axis=0), wts)
     def save_img(self, m, n, fold_curve='fold', repeat_time=4, relativeShift_position='relativeShift_v2'):
         """Generates and saves perturbed images."""
+        print(f"---- save_img: m={m}, n={n}, fold_curve={fold_curve} ----") # Debug
         begin_time = time.time()
 
         origin_img = cv2.imread(self.path, flags=cv2.IMREAD_COLOR)
         if origin_img is None:
-            print(f"Error: Could not read image at {self.path}")
+            print(f"ERROR: Could not read image at {self.path}")
             return
+
+        print(f"Successfully loaded origin_img: {self.path}, shape: {origin_img.shape}") # Debug
+        print(f"Original image shape: {origin_img.shape}")
 
         save_img_shape = [512*2, 480*2]
         reduce_value = np.random.choice([8*2, 16*2, 24*2, 32*2, 40*2, 48*2], p=[0.1, 0.2, 0.4, 0.1, 0.1, 0.1])
@@ -130,16 +143,19 @@ class perturbed(object):
             im_ud = base_img_shrink
 
         self.origin_img = cv2.resize(origin_img, (im_ud, im_lr), interpolation=cv2.INTER_CUBIC)
+        print(f"Resized image shape: {self.origin_img.shape}")
 
         perturbed_bg_filenames = getDatasets(self.bg_path)
         if not perturbed_bg_filenames:
-            print(f"Error: No background images found in {self.bg_path}")
+            print(f"ERROR: No background images found in {self.bg_path}")
             return
         perturbed_bg_img_path = os.path.join(self.bg_path, random.choice(perturbed_bg_filenames))
         perturbed_bg_img = cv2.imread(perturbed_bg_img_path, flags=cv2.IMREAD_COLOR)
         if perturbed_bg_img is None:
-            print(f"Error: Could not read background image at {perturbed_bg_img_path}")
+            print(f"ERROR: Could not read background image at {perturbed_bg_img_path}")
             return
+
+        print(f"Successfully loaded perturbed_bg_img: {perturbed_bg_img_path}, shape: {perturbed_bg_img.shape}") # Debug
 
         perturbed_bg_img = cv2.resize(perturbed_bg_img, (save_img_shape[1], save_img_shape[0]), cv2.INTER_AREA)
 
@@ -189,6 +205,7 @@ class perturbed(object):
             is_normalizationFun_mixture = False
 
         for repeat_i in range(repeat_time):
+            print(f"  Perturbation iteration: {repeat_i}") # Debug
             synthesis_perturbed_img = np.full_like(self.synthesis_perturbed_img, 257, dtype=np.int16)
             synthesis_perturbed_label = np.zeros_like(self.synthesis_perturbed_label)
 
@@ -280,8 +297,6 @@ class perturbed(object):
                 perturbed_y_min = max(0, non_background_cols[0] - 1)
                 perturbed_y_max = min(self.new_shape[1], non_background_cols[-1] + 1)
                 is_save_perturbed = True  # Set flag if valid box found
-            # else: # Remove else, the flag is already initialized
-            #     is_save_perturbed = False # Redundant
 
             # Perform further validation checks *only if* a valid box was found
             if is_save_perturbed:
@@ -298,9 +313,13 @@ class perturbed(object):
 
                 if ((perturbed_x_max-perturbed_x_min) < (mesh_shape_[0]-mesh_0_s) or (perturbed_y_max-perturbed_y_min) < (mesh_shape_[1]-mesh_1_s) or (perturbed_x_max-perturbed_x_min) > (mesh_shape_[0]+mesh_0_b) or (perturbed_y_max-perturbed_y_min) > (mesh_shape_[1]+mesh_1_b)):
                     is_save_perturbed = False
+            else: #if not is_save_perturbed
+                print("  is_save_perturbed is False after initial perturbation. Skipping iteration...")
+
 
             # Proceed with processing *only if* all validations passed
             if is_save_perturbed:
+                print("    is_save_perturbed is True. Proceeding...")
                 self.synthesis_perturbed_img = np.full_like(self.synthesis_perturbed_img, 257, dtype=np.int16)
                 self.synthesis_perturbed_label = np.zeros((self.new_shape[0], self.new_shape[1], 2))
 
@@ -323,8 +342,11 @@ class perturbed(object):
                 perturbed_time += 1
 
         if fail_perturbed_time == repeat_time:
+            print("    fail_perturbed_time == repeat_time. Raising exception.") # Debug
             raise Exception('clip error')
 
+        # --- Perspective Transformation ---
+        print("  Applying perspective transform...") # Debug
         perspective_shreshold = 280
         x_min_per, y_min_per, x_max_per, y_max_per = self.adjust_position(perspective_shreshold, perspective_shreshold, self.new_shape[0]-perspective_shreshold, self.new_shape[1]-perspective_shreshold)
         pts1 = np.float32([[x_min_per, y_min_per], [x_max_per, y_min_per], [x_min_per, y_max_per], [x_max_per, y_max_per]])
@@ -390,7 +412,7 @@ class perturbed(object):
             print(f"An error occurred: {e}") # Keep for debugging
             pass
 
-        is_save_perspective = False
+        is_save_perspective = False  # Initialize
         perspective_x_min, perspective_y_min, perspective_x_max, perspective_y_max = -1, -1, self.new_shape[0], self.new_shape[1]
 
         non_background_rows = np.where(np.sum(synthesis_perturbed_img, axis=(1, 2)) != 771 * self.new_shape[1])[0]
@@ -406,9 +428,9 @@ class perturbed(object):
         # Perform further validation checks *only if* a valid box was found
         if is_save_perspective:
             if perspective_y_min <= 0 or perspective_y_max >= self.new_shape[1]-1 or perspective_x_min <= 0 or perspective_x_max >= self.new_shape[0]-1:
-                is_save_perspective = False  # Corrected: set the flag
+                is_save_perspective = False
             if perspective_y_max - perspective_y_min <= 1 or perspective_x_max - perspective_x_min <= 1:
-                is_save_perspective = False  # Corrected: set the flag
+                is_save_perspective = False
 
             mesh_0_b = int(round(im_lr*0.2))
             mesh_1_b = int(round(im_ud*0.2))
@@ -416,8 +438,11 @@ class perturbed(object):
             mesh_1_s = int(round(im_ud*0.1))
             if ((perspective_x_max-perspective_x_min) < (mesh_shape_[0]-mesh_0_s) or (perspective_y_max-perspective_y_min) < (mesh_shape_[1]-mesh_1_s) or (perspective_x_max-perspective_x_min) > (mesh_shape_[0]+mesh_0_b) or (perspective_y_max-perspective_y_min) > (mesh_shape_[1]+mesh_1_b)):
                 is_save_perspective = False
+        else: # if not  is_save_perspective
+            print("  is_save_perspective is False after perspective transform. Skipping...")
 
         if is_save_perspective:
+            print("    is_save_perspective is True. Proceeding with perspective transform...")
             self.synthesis_perturbed_img = np.full_like(self.synthesis_perturbed_img, 257, dtype=np.int16)
             self.synthesis_perturbed_label = np.zeros((self.new_shape[0], self.new_shape[1], 2))
 
@@ -438,11 +463,13 @@ class perturbed(object):
         perfix_ = self.save_suffix + '_' + str(m) + '_' + str(n)
 
         if not is_save_perturbed and perturbed_time == 0:
+            print("    fail_perturbed_time == repeat_time and perturbed_time == 0. Raising exception.") # Debug
             raise Exception('clip error')
         else:
-            is_save_perturbed = True  # Ensure this is set
+            is_save_perturbed = True
 
         if is_save_perturbed:
+            print("    Final is_save_perturbed is True.  Saving image...") # Debug
             self.new_shape = save_img_shape
 
             synthesis_perturbed_img = self.synthesis_perturbed_img[self.perturbed_x_min:self.perturbed_x_max, self.perturbed_y_min:self.perturbed_y_max, :].copy()
@@ -516,23 +543,32 @@ class perturbed(object):
                 self.synthesis_perturbed_img[self.synthesis_perturbed_img < 0] = 0
 
                 cv2.imwrite(self.save_path + 'png/' + perfix_ + '_' + fold_curve + '.png', self.synthesis_perturbed_img)
+                print(f"       Saved PNG to: {self.save_path + 'png/' + perfix_ + '_' + fold_curve + '.png'}") # Debug
                 synthesis_perturbed_color = np.concatenate((self.synthesis_perturbed_img, label), axis=2)
                 with open(self.save_path+'color/'+perfix_+'_'+fold_curve+'.gw', 'wb') as f:
                     pickle_perturbed_data = pickle.dumps(synthesis_perturbed_color)
                     f.write(pickle_perturbed_data)
+                print(f"       Saved GW to: {self.save_path + 'color/' + perfix_ + '_' + fold_curve + '.gw'}")  # Debug
+            else: # if not is_save_perturbed
+                print("   Final is_save_perturbed is False. Not saving.")
 
-        if not is_save_perturbed:
-            print('save error')
-        else:
-            cv2.imwrite(self.save_path + 'scan/' + self.save_suffix + '_' + str(m) + '.png', self.origin_img)
-            end_time = time.time()
-            elapsed_time = end_time - begin_time
-            mm, ss = divmod(elapsed_time, 60)
-            hh, mm = divmod(mm, 60)
-            print(f"{m}_{n}_{fold_curve} Time : {hh:02.0f}:{mm:02.0f}:{ss:02.0f}")
+        end_time = time.time()
+        elapsed_time = end_time - begin_time
+        mm, ss = divmod(elapsed_time, 60)
+        hh, mm = divmod(mm, 60)
+        print(f"{m}_{n}_{fold_curve} Time : {hh:02.0f}:{mm:02.0f}:{ss:02.0f}")
 
 def xgw(args):
     """Main function to process images and generate perturbations."""
+    print("----- Debugging Argument Values -----")
+    print(f"  --path: {args.path}")
+    print(f"  --bg_path: {args.bg_path}")
+    print(f"  --output_path: {args.output_path}")
+    print(f"  --count_from: {args.count_from}")
+    print(f"  --repeat_T: {args.repeat_T}")
+    print(f"  --sys_num: {args.sys_num}")
+    print("-------------------------------------")
+
     path = args.path
     bg_path = args.bg_path
     if not os.path.exists(path):
@@ -554,14 +590,23 @@ def xgw(args):
 
     all_img_path = getDatasets(path)
     all_bgImg_path = getDatasets(bg_path)
-    global begin_train  # Not strictly needed here, but good practice
+
+    if not all_img_path:
+        print("ERROR: No input images found.  Exiting.")
+        return
+    if not all_bgImg_path:
+        print("ERROR: No background image directories found.  Exiting.")
+        return
+
     begin_train = time.time()
 
     process_pool = Pool(2)
     for m, img_path in enumerate(all_img_path):
+        print(f"Processing image: {img_path} (m={m})") # Debug
         for n in range(args.sys_num):
             img_path_ = os.path.join(path, img_path)
             bg_path_ = os.path.join(bg_path, random.choice(all_bgImg_path)) + '/'
+            print(f"  Iteration n={n}, bg_path_: {bg_path_}")  # Debug
 
             for _ in range(10):  # Retry loop
                 try:
@@ -590,6 +635,4 @@ if __name__ == '__main__':
     parser.add_argument('--repeat_T', default=0, type=int)
     parser.add_argument('--sys_num', default=7, type=int, help='Number of synthetic images per input image.')
     args = parser.parse_args()
-    xgw(args)                                                                                                                                                                                                   
-                                                                                                                                                                                                   
-                                                                                                                                                                                                   
+    xgw(args)
