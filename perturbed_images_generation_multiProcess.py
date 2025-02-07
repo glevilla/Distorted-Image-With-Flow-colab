@@ -458,7 +458,8 @@ class perturbed(object):
             raise Exception('clip error')
 
 
-        # --- Perspective Transformation (Preserving Original Logic) ---
+      
+# --- Perspective Transformation (Preserving Original Logic) ---
         perspective_shreshold = 280
         x_min_per, y_min_per, x_max_per, y_max_per = self.adjust_position(perspective_shreshold, perspective_shreshold, self.new_shape[0]-perspective_shreshold, self.new_shape[1]-perspective_shreshold)
         pts1 = np.float32([[x_min_per, y_min_per], [x_max_per, y_min_per], [x_min_per, y_max_per], [x_max_per, y_max_per]])
@@ -512,18 +513,24 @@ class perturbed(object):
         synthesis_perturbed_img = np.full_like(self.synthesis_perturbed_img, 257, dtype=np.int16)
         synthesis_perturbed_label = np.zeros_like(self.synthesis_perturbed_label)
 
-        # Optimized pixel mapping using NumPy indexing
+        # Optimized pixel mapping with correct error handling.
         rows, cols = perturbed_xy_round_int.shape[:2]
         row_indices, col_indices = np.indices((rows, cols))
-        try:
-            valid_mask = (perturbed_xy_round_int[:, :, 0] >= 0) & (perturbed_xy_round_int[:, :, 0] < self.synthesis_perturbed_img.shape[0]) & \
-                         (perturbed_xy_round_int[:, :, 1] >= 0) & (perturbed_xy_round_int[:, :, 1] < self.synthesis_perturbed_img.shape[1])
 
+        valid_mask = (perturbed_xy_round_int[:, :, 0] >= 0) & (perturbed_xy_round_int[:, :, 0] < self.synthesis_perturbed_img.shape[0]) & \
+                     (perturbed_xy_round_int[:, :, 1] >= 0) & (perturbed_xy_round_int[:, :, 1] < self.synthesis_perturbed_img.shape[1])
+
+        # Apply the transformation ONLY to valid pixels.
+        try:
             synthesis_perturbed_img[row_indices[valid_mask], col_indices[valid_mask]] = self.synthesis_perturbed_img[perturbed_xy_round_int[valid_mask, 0], perturbed_xy_round_int[valid_mask, 1]]
             synthesis_perturbed_label[row_indices[valid_mask], col_indices[valid_mask]] = self.synthesis_perturbed_label[perturbed_xy_round_int[valid_mask, 0], perturbed_xy_round_int[valid_mask, 1]]
-        except Exception as e: #Catching exception
-            continue
-
+        except Exception as e:
+            print(f"An unexpected error occurred during perspective pixel mapping: {e}")
+            #  Crucially, we do NOT continue here.  We let the rest of the
+            #  validation happen.  If the image is completely invalid
+            #  due to the error, the later checks will catch it.
+            #  If *some* pixels were mapped, we still proceed.
+            pass # Use pass instead of continue
 
         # --- Validation for Perspective Transformation ---
         is_save_perspective_1, is_save_perspective_2, is_save_perspective_3, is_save_perspective_4 = False, False, False, False
