@@ -394,8 +394,9 @@ class perturbed(object):
                 exit()
 
 
-            # --- Validation and Clipping (Preserving Original Logic)---
+# --- Validation and Clipping (Preserving Original Logic)---
             is_save_perturbed = False
+            # These flags are not strictly needed anymore, but keep for clarity
             is_save_perturbed_1, is_save_perturbed_2, is_save_perturbed_3, is_save_perturbed_4 = False, False, False, False
 
             perturbed_x_min, perturbed_y_min, perturbed_x_max, perturbed_y_max = -1, -1, self.new_shape[0], self.new_shape[1]
@@ -411,27 +412,33 @@ class perturbed(object):
                 perturbed_y_max = min(self.new_shape[1], non_background_cols[-1] + 1)
                 is_save_perturbed = True
             else:
-                continue
+                is_save_perturbed = False  # Explicitly set to False
+                # We do NOT use 'continue' here.  We set is_save_perturbed
+                # to False and let the later 'if is_save_perturbed:'
+                # block handle skipping the rest of the processing.
 
-            if perturbed_y_min <= 0 or perturbed_y_max >= self.new_shape[1]-1 or perturbed_x_min <= 0 or perturbed_x_max >= self.new_shape[0]-1:
-                is_save_perturbed = False
-                continue
-            if perturbed_y_max - perturbed_y_min <= 1 or perturbed_x_max - perturbed_x_min <= 1:
-                is_save_perturbed = False
-                fail_perturbed_time += 1
-                continue
-
-            mesh_0_b = int(round(im_lr*0.2))
-            mesh_1_b = int(round(im_ud*0.2))
-            mesh_0_s = int(round(im_lr*0.1))
-            mesh_1_s = int(round(im_ud*0.1))
-
-            if ((perturbed_x_max-perturbed_x_min) < (mesh_shape_[0]-mesh_0_s) or (perturbed_y_max-perturbed_y_min) < (mesh_shape_[1]-mesh_1_s) or (perturbed_x_max-perturbed_x_min) > (mesh_shape_[0]+mesh_0_b) or (perturbed_y_max-perturbed_y_min) > (mesh_shape_[1]+mesh_1_b)):
-                is_save_perturbed = False
-                continue
-
-
+            # We move the rest of the validation checks *inside* the
+            # 'if is_save_perturbed:' block.  This ensures they are
+            # only executed if we found a valid bounding box.
             if is_save_perturbed:
+                if perturbed_y_min <= 0 or perturbed_y_max >= self.new_shape[1]-1 or perturbed_x_min <= 0 or perturbed_x_max >= self.new_shape[0]-1:
+                    is_save_perturbed = False
+                    # Again, no 'continue'.  We rely on the outer 'if'
+                if perturbed_y_max - perturbed_y_min <= 1 or perturbed_x_max - perturbed_x_min <= 1:
+                    is_save_perturbed = False
+                    fail_perturbed_time += 1
+                    # No 'continue' here either.
+
+                mesh_0_b = int(round(im_lr*0.2))
+                mesh_1_b = int(round(im_ud*0.2))
+                mesh_0_s = int(round(im_lr*0.1))
+                mesh_1_s = int(round(im_ud*0.1))
+
+                if ((perturbed_x_max-perturbed_x_min) < (mesh_shape_[0]-mesh_0_s) or (perturbed_y_max-perturbed_y_min) < (mesh_shape_[1]-mesh_1_s) or (perturbed_x_max-perturbed_x_min) > (mesh_shape_[0]+mesh_0_b) or (perturbed_y_max-perturbed_y_min) > (mesh_shape_[1]+mesh_1_b)):
+                    is_save_perturbed = False
+                    # And no 'continue' here.
+
+            if is_save_perturbed: # This if was already here
                 # Reset and copy valid perturbed region
                 self.synthesis_perturbed_img = np.full_like(self.synthesis_perturbed_img, 257, dtype=np.int16)
                 self.synthesis_perturbed_label = np.zeros((self.new_shape[0], self.new_shape[1], 2))
